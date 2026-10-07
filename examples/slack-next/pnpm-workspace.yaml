@@ -1,3 +1,10 @@
 allowBuilds:
+  "@swc/core": true
+  cbor-extract: true
   esbuild: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - "@workflow/core@5.1.0"
+  - "@workflow/next@5.0.2"
+  - "@workflow/web@5.0.2"
+  - "@workflow/world-local@5.0.2"

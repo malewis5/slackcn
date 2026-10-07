@@ -1,4 +1,4 @@
-import { parseSignInContext } from "@/lib/sign-in";
+import { parseSignInContext } from "@/lib/sign-in-context";
 import { SignInButtons } from "./sign-in-buttons";
 
 export default async function SignInPage({

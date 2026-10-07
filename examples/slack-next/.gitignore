@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+/.swc
+
+# Workflow's generated routes and local durable execution history
+/app/.well-known/workflow/
+/.workflow-data/

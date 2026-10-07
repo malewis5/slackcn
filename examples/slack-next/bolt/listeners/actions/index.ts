@@ -5,8 +5,13 @@ import {
   cancelSignInActionId,
   continueActionId,
   signInActionId,
-} from "../events/app-mention";
-import { signInCallback, cancelContinueCallback, cancelSignInCallback, continueCallback } from "./sign-in";
+} from "@/lib/messages";
+import {
+  signInCallback,
+  cancelContinueCallback,
+  cancelSignInCallback,
+  continueCallback,
+} from "./sign-in";
 import signOutCallback from "./sign-out";
 
 const register = (app: App) => {

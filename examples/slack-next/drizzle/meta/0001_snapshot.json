@@ -1,6 +1,6 @@
 {
-  "id": "721f3dcd-70a7-481a-8601-e64dbee0af97",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "f1e91e8a-8553-4893-af56-4c04346c8a6d",
+  "prevId": "721f3dcd-70a7-481a-8601-e64dbee0af97",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -33,6 +33,13 @@
           "notNull": true,
           "default": false
         },
+        "uninstalling": {
+          "name": "uninstalling",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "installation": {
           "name": "installation",
           "type": "jsonb",
@@ -48,10 +55,22 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.sign_in_prompts": {
-      "name": "sign_in_prompts",
+    "public.pending_requests": {
+      "name": "pending_requests",
       "schema": "",
       "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "hook_token": {
+          "name": "hook_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "installation_id": {
           "name": "installation_id",
           "type": "text",
@@ -75,13 +94,41 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "prompt_ts": {
+          "name": "prompt_ts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "pending_requests_user_idx": {
+          "name": "pending_requests_user_idx",
+          "columns": [
+            {
+              "expression": "installation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
-        "sign_in_prompts_installation_id_installations_id_fk": {
-          "name": "sign_in_prompts_installation_id_installations_id_fk",
-          "tableFrom": "sign_in_prompts",
+        "pending_requests_installation_id_installations_id_fk": {
+          "name": "pending_requests_installation_id_installations_id_fk",
+          "tableFrom": "pending_requests",
           "tableTo": "installations",
           "columnsFrom": ["installation_id"],
           "columnsTo": ["id"],
@@ -89,12 +136,7 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "sign_in_prompts_installation_id_user_id_channel_ts_pk": {
-          "name": "sign_in_prompts_installation_id_user_id_channel_ts_pk",
-          "columns": ["installation_id", "user_id", "channel", "ts"]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

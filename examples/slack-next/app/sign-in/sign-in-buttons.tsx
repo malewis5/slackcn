@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { SignInContext } from "@/lib/sign-in";
+import type { SignInContext } from "@/lib/sign-in-context";
 import { goBack, signIn } from "./actions";
 
 type SlackReturnLinks = { app: string; web: string };

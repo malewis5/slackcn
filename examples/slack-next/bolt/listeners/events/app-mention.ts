@@ -1,35 +1,16 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
-import type { Button, KnownBlock } from "@slack/types";
-import { installationKey, isSignedIn, rememberSignInPrompt } from "@/lib/database";
-import { signedInMessage, signInPageUrl, type SignInContext } from "@/lib/sign-in";
-
-export const signOutActionId = "slackcn.sign_out";
-export const signInActionId = "slackcn.sign_in";
-export const cancelSignInActionId = "slackcn.cancel";
-export const continueActionId = "slackcn.continue";
-export const cancelContinueActionId = "slackcn.cancel_continue";
+import { start } from "workflow/api";
+import { installationKey } from "@/lib/database";
+import { handleMention } from "@/workflows/mention";
 
 export const appMentionCallback = async ({
   event,
-  client,
   context,
 }: AllMiddlewareArgs & SlackEventMiddlewareArgs<"app_mention">) => {
-  const installationId = installationKey(context);
-  if (!event.user || !installationId) return;
+  if (!event.user || !installationKey(context) || !context.teamId) return;
 
-  const signedIn = await isSignedIn(installationId, event.user);
-  const threadTs = event.thread_ts ?? event.ts;
-
-  if (signedIn) {
-    await client.chat.postMessage({
-      channel: event.channel,
-      thread_ts: threadTs,
-      ...signedInMessage(event.user),
-    });
-  } else {
-    if (!context.teamId) return;
-
-    const destination: SignInContext = {
+  await start(handleMention, [
+    {
       userId: event.user,
       teamId: context.teamId,
       enterpriseId: context.enterpriseId,
@@ -37,72 +18,6 @@ export const appMentionCallback = async ({
       channel: event.channel,
       ts: event.ts,
       threadTs: event.thread_ts,
-    };
-    const posted = await client.chat.postMessage({
-      channel: event.channel,
-      thread_ts: threadTs,
-      ...signInPrompt(event.user, signInPageUrl(destination)),
-    });
-    if (!posted.ts) return;
-
-    await rememberSignInPrompt(installationId, event.user, {
-      channel: event.channel,
-      ts: posted.ts,
-    });
-    await client.chat.update({
-      channel: event.channel,
-      ts: posted.ts,
-      ...signInPrompt(event.user, signInPageUrl({ ...destination, promptTs: posted.ts })),
-    });
-  }
-}
-
-export function continueHereMessage(userId: string) {
-  const text = `You're signed in, <@${userId}>. Continue here?`;
-  const continueButton = {
-    type: "button",
-    text: { type: "plain_text", text: "Continue", emoji: true },
-    action_id: continueActionId,
-    visible_to_user_ids: [userId],
-  } satisfies Button & { visible_to_user_ids: string[] };
-  const cancelButton = {
-    type: "button",
-    text: { type: "plain_text", text: "Cancel", emoji: true },
-    action_id: cancelContinueActionId,
-    visible_to_user_ids: [userId],
-  } satisfies Button & { visible_to_user_ids: string[] };
-
-  return {
-    text,
-    blocks: [
-      { type: "section", text: { type: "mrkdwn", text } },
-      { type: "actions", elements: [continueButton, cancelButton] },
-    ] satisfies KnownBlock[],
-  };
-}
-
-function signInPrompt(userId: string, url: string) {
-  const text = `Waiting for <@${userId}> to sign in before continuing.`;
-  const signInButton = {
-    type: "button",
-    text: { type: "plain_text", text: "Sign in", emoji: true },
-    action_id: signInActionId,
-    url,
-    visible_to_user_ids: [userId],
-  } satisfies Button & { visible_to_user_ids: string[] };
-
-  const cancelSignInButton = {
-    type: "button",
-    text: { type: "plain_text", text: "Cancel", emoji: true },
-    action_id: cancelSignInActionId,
-    visible_to_user_ids: [userId],
-  } satisfies Button & { visible_to_user_ids: string[] };
-
-  return {
-    text,
-    blocks: [
-      { type: "section", text: { type: "mrkdwn", text } },
-      { type: "actions", elements: [signInButton, cancelSignInButton] },
-    ] satisfies KnownBlock[],
-  };
+    },
+  ]);
 };

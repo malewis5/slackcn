@@ -1,6 +1,7 @@
 import type { AllMiddlewareArgs, BlockAction, SlackActionMiddlewareArgs } from "@slack/bolt";
 import { installationKey, signOutUser } from "@/lib/database";
-import { publishAppHome } from "../events/app-home-opened";
+import { publishAppHome } from "@/lib/app-home";
+import { refreshPendingRequests } from "@/lib/requests";
 
 const signOutCallback = async ({
   ack,
@@ -13,6 +14,7 @@ const signOutCallback = async ({
   if (!installationId) return;
 
   await signOutUser(installationId, body.user.id);
+  await refreshPendingRequests(installationId, body.user.id);
   if (!context.teamId) return;
 
   await publishAppHome(client, installationId, body.user.id, {
