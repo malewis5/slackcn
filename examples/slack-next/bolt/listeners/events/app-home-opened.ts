@@ -1,10 +1,20 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
 import type { KnownBlock } from "@slack/types";
-import type { WebClient } from "@slack/web-api";
 import { installationKey, usersFor } from "@/lib/database";
 import { signInActionId, signOutActionId } from "./app-mention";
 
-export async function publishAppHome(client: WebClient, installationId: string, userId: string) {
+export async function publishAppHome(
+  client: {
+    views: {
+      publish: (args: {
+        user_id: string;
+        view: { type: "home"; blocks: KnownBlock[] };
+      }) => Promise<unknown>;
+    };
+  },
+  installationId: string,
+  userId: string,
+) {
   const blocks: KnownBlock[] = usersFor(installationId).has(userId)
     ? [
         {

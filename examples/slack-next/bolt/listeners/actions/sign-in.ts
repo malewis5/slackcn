@@ -3,7 +3,8 @@ import type {
   BlockAction,
   SlackActionMiddlewareArgs,
 } from "@slack/bolt";
-import { installationKey, usersFor } from "@/lib/database";
+import { forgetSignInPrompt, installationKey, usersFor } from "@/lib/database";
+import { cancelSignIn, showSignedInInThreads } from "@/lib/sign-in";
 import { publishAppHome } from "../events/app-home-opened";
 
 export const signInCallback = async ({
@@ -13,17 +14,19 @@ export const signInCallback = async ({
   context,
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
+  // Link buttons open the sign-in page. That page records the user.
+  if (body.channel?.id && body.message?.ts) return;
+
   const installationId = installationKey(context);
   if (!installationId) return;
 
   usersFor(installationId).add(body.user.id);
   await publishAppHome(client, installationId, body.user.id);
-
-  const channel = body.channel?.id;
-  const ts = body.message?.ts;
-  if (!channel || !ts) return;
-
-  await client.chat.delete({ channel, ts });
+  await showSignedInInThreads(
+    (message) => client.chat.update(message),
+    installationId,
+    body.user.id,
+  );
 };
 
 export const cancelSignInCallback = async ({
@@ -33,18 +36,25 @@ export const cancelSignInCallback = async ({
   context,
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
-  const installationId = installationKey(context);
-  if (installationId) usersFor(installationId).delete(body.user.id);
-
   const channel = body.channel?.id;
   const ts = body.message?.ts;
-  if (!channel || !ts) return;
+  const installationId = installationKey(context);
+  if (!channel || !ts) {
+    if (installationId) {
+      usersFor(installationId).delete(body.user.id);
+      await publishAppHome(client, installationId, body.user.id);
+    }
+    return;
+  }
 
-  const text = `<@${body.user.id}> cancelled sign-in`;
-  await client.chat.update({
+  await cancelSignIn((message) => client.chat.update(message), {
+    installationId,
+    userId: body.user.id,
     channel,
     ts,
-    text,
-    blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
   });
+  if (!installationId) return;
+
+  forgetSignInPrompt(installationId, body.user.id, { channel, ts });
+  await publishAppHome(client, installationId, body.user.id);
 };
