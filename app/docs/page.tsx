@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CodeBlock } from "@/components/code-block";
+import { getBaseURL } from "@/lib/get-base-url";
 
 export const metadata: Metadata = { title: "Introduction" };
 
@@ -22,21 +23,16 @@ export default function Introduction() {
         Registry items are plain TypeScript. Your bot does not need Next.js, React, Tailwind, or a
         shadcn configuration. This website uses Next.js to host the docs and registry JSON.
       </p>
-      <h2>Try the local registry</h2>
-      <p>
-        Start this repository with <code>pnpm dev</code>. Then run this command in your bot project:
-      </p>
+      <h2>Install a component</h2>
+      <p>Run this command in your bot project:</p>
       <CodeBlock label="Terminal">
-        {"pnpm dlx shadcn@latest add http://localhost:3000/r/sign-in-message.json"}
+        {`pnpm dlx shadcn@latest add ${getBaseURL()}/r/sign-in-message.json`}
       </CodeBlock>
-      <p>
-        Once the site is deployed, replace <code>http://localhost:3000</code> with its origin. The
-        CLI needs access to the registry URL.
-      </p>
       <h2>Start with a sign-in message</h2>
       <p>
-        The first helper builds a visible waiting message with a requester-only sign-in button. Your
-        application supplies the authentication URL and handles the workflow.
+        The first helper builds a public waiting message with Sign in and Cancel buttons. Your
+        application supplies the allowed user IDs and sign-in URL, then registers the default
+        cancellation handler or its own action.
       </p>
       <Link href="/docs/components/sign-in-message" className="button">
         Sign-in message →

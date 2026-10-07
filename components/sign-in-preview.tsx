@@ -14,10 +14,13 @@ export function SignInPreview() {
           <p>
             Waiting for <span className="mention">@alex</span> to sign in before continuing.
           </p>
-          <span className="preview-action">Sign in</span>
+          <div className="preview-actions">
+            <span className="preview-action">Sign in</span>
+            <span className="preview-action preview-cancel">Cancel</span>
+          </div>
         </div>
       </div>
-      <figcaption>Illustrative preview · Only Alex sees the sign-in button.</figcaption>
+      <figcaption>Illustrative preview · Only Alex sees the buttons.</figcaption>
     </figure>
   );
 }

@@ -239,6 +239,10 @@ h3 {
   color: #126b98;
   background: #eaf3f9;
 }
+.preview-actions {
+  display: flex;
+  gap: 8px;
+}
 .preview-action {
   display: inline-block;
   border: 1px solid #1d764b;
@@ -251,6 +255,10 @@ h3 {
   color: var(--muted);
   font-size: 11px;
   text-align: center;
+}
+.preview-cancel {
+  border-color: var(--line);
+  color: var(--foreground);
 }
 .site-footer {
   display: flex;

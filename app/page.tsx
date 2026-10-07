@@ -39,7 +39,7 @@ export default function Home() {
             <h3>{registry.items[0].title}</h3>
             <p>
               Keep the thread in the loop while the person who asked signs in. A shared status, with
-              a button just for them.
+              sign-in and cancel buttons just for them.
             </p>
             <Link href="/docs/components/sign-in-message" className="text-link">
               View component →

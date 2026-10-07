@@ -28,6 +28,7 @@ pnpm start          # serve the production build
 ```text
 app/                 Docs site and pages
 components/          Website components and illustrative previews
+lib/                 Website utilities
 registry/slack/      Distributable TypeScript source and colocated tests
 registry.json        Registry item metadata, dependencies and install targets
 public/r/            Generated registry JSON (ignored by Git)
@@ -45,9 +46,22 @@ With the local site running, execute this in a separate TypeScript bot project:
 pnpm dlx shadcn@latest add http://localhost:3000/r/sign-in-message.json
 ```
 
-The CLI copies `slackcn/sign-in-message.ts` and installs `@slack/types`. Items use `registry:item` with explicit file targets, so consumers do not need React, Next.js, or `components.json`.
+The CLI copies `slackcn/sign-in-message.ts` and installs `@slack/types`, `@slack/web-api`, and Node's type definitions. Items use `registry:item` with explicit file targets, so consumers do not need React, Next.js, or `components.json`.
 
-The initial `sign-in-message` item is a message builder: public waiting text plus a button using `visible_to_user_ids`. The complete authentication flow—persisted pause/resume, verified callbacks, message cleanup, errors and expiry—is still to be implemented. Button visibility is not authorization. Posting the payload and acknowledging the `slackcn.sign_in` action belong to the host bot.
+The `sign-in-message` item builds a public waiting message with Sign in and Cancel buttons:
+
+```ts
+const message = signInMessage({
+  visible_to_user_ids: [requesterId],
+  url: "https://your-app.example/sign-in",
+});
+```
+
+Sign in opens `url` in the browser; Cancel dispatches a Slack action. Both buttons set `visible_to_user_ids` to the supplied IDs. The list must contain at least one user. Acknowledge `signInActionIds.signIn` (Slack sends an interaction for URL buttons too). Sign-in completion belongs to your web callback.
+
+Explicitly register `signInActionIds.cancel` to use the default `cancelSignInMessage` handler. It deletes the waiting message, then posts **“Canceled by @username.”** in the same thread or channel, mentioning the user who clicked Cancel. Userland authorizes the interaction and cancels any underlying task before invoking this Slack message handler. API failures propagate; deletion and posting are separate operations, so userland owns retries.
+
+To use a custom Cancel action, pass `action_id` to `signInMessage` and register your own handler for that ID. The Sign in acknowledgement ID remains `signInActionIds.signIn`. Validate the user in the sign-in flow and cancel handler—button visibility is not authorization.
 
 ## Add a registry item
 
@@ -68,6 +82,8 @@ Enable **Allow GitHub Actions to create and approve pull requests** in the repos
 
 Deploy this root directory as a Next.js project, for example through Vercel’s Git integration with the private GitHub repository. Use `pnpm install --frozen-lockfile` and `pnpm build`. The docs and `/r/*.json` ship together; production follows `main`, including changes merged before a version PR. Changesets records release history rather than gating deployment.
 
-After deployment, replace the local origin in installation examples and set `registry.json`’s `homepage` to the docs URL. The repository can remain private, but consumers must be able to fetch the deployed registry JSON. Deployment protection also protects registry endpoints; configure access accordingly. Hosting and a production domain are not configured by this scaffold.
+The docs use `getBaseURL()` in `lib/get-base-url.ts` for installation commands. It reads Vercel’s [system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables): production uses `VERCEL_PROJECT_PRODUCTION_URL` (falling back to `VERCEL_URL`), preview uses `VERCEL_URL`, and local uses `http://localhost:${PORT}` with port `3000` as the default. Enable access to system environment variables in the Vercel project settings. These URLs are rendered when the site is built.
+
+After deployment, set `registry.json`’s `homepage` to the docs URL. The repository can remain private, but consumers must be able to fetch the deployed registry JSON. Deployment protection also protects registry endpoints; configure access accordingly. Hosting and a production domain are not configured by this scaffold.
 
 The source is currently `UNLICENSED`. Choose a distribution license before opening the registry to outside consumers.

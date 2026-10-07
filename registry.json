@@ -7,8 +7,9 @@
       "name": "sign-in-message",
       "type": "registry:item",
       "title": "Sign-in message",
-      "description": "A public Block Kit message with a sign-in button visible to the requester.",
-      "dependencies": ["@slack/types@^3.2.0"],
+      "description": "A public waiting message with restricted Sign in and Cancel buttons, plus a default cancellation handler.",
+      "dependencies": ["@slack/types@^3.2.0", "@slack/web-api@^8.2.0"],
+      "devDependencies": ["@types/node"],
       "files": [
         {
           "path": "registry/slack/sign-in-message.ts",
