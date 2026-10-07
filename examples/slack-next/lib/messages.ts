@@ -6,14 +6,6 @@ export const cancelSignInActionId = "slackcn.cancel";
 export const continueActionId = "slackcn.continue";
 export const cancelContinueActionId = "slackcn.cancel_continue";
 
-export function signedInMessage(userId: string) {
-  const text = `Hi, <@${userId}>!`;
-  return {
-    text,
-    blocks: [{ type: "section", text: { type: "mrkdwn", text } }] satisfies KnownBlock[],
-  };
-}
-
 export function cancelledSignInMessage(userId: string) {
   const text = `<@${userId}> cancelled sign-in`;
   return {

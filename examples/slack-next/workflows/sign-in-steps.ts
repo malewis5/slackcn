@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   forgetRequest,
   getInstallation,
@@ -12,12 +11,20 @@ import {
   cancelledRequestMessage,
   cancelledSignInMessage,
   continueHereMessage,
-  signedInMessage,
   signInPrompt,
 } from "@/lib/messages";
 import type { RequestSignal } from "@/lib/requests";
 import { signInPageUrl, type ThreadSignInContext } from "@/lib/sign-in-context";
-import { slackApi } from "@/lib/slack";
+import { clientMessageId, slackApi } from "@/lib/slack";
+
+export async function getSignInStatus(input: ThreadSignInContext) {
+  "use step";
+  const installationId = installationKey(input);
+  if (!installationId || !(await getInstallation(installationId))) return "uninstalled" as const;
+  return (await isSignedIn(installationId, input.userId))
+    ? ("ready" as const)
+    : ("waiting" as const);
+}
 
 export async function registerRequest(
   input: ThreadSignInContext,
@@ -40,30 +47,41 @@ export async function registerRequest(
 export async function beginRequest(input: ThreadSignInContext, runId: string) {
   "use step";
   const request = await getRequest(runId);
-  if (!request || !(await getInstallation(request.installationId))) return false;
+  if (!request || !(await getInstallation(request.installationId))) return "uninstalled" as const;
   const signedIn = await isSignedIn(request.installationId, input.userId);
+  if (signedIn) {
+    if (request.promptTs) await deletePrompt(request);
+    return "ready" as const;
+  }
   // A retry after posting uses the same Slack message, rather than posting another.
   if (!request.promptTs) {
-    const hash = createHash("sha256").update(runId).digest("hex");
-    const clientMsgId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     const result = await slackApi<{ ts: string }>(request.installationId, "chat.postMessage", {
       channel: input.channel,
       thread_ts: input.threadTs ?? input.ts,
-      client_msg_id: clientMsgId,
-      ...(signedIn
-        ? signedInMessage(input.userId)
-        : signInPrompt(input.userId, signInPageUrl({ ...input, requestId: runId }), runId)),
+      client_msg_id: clientMessageId(`${runId}:sign-in`),
+      ...signInPrompt(input.userId, signInPageUrl({ ...input, requestId: runId }), runId),
     });
     if (!result.ts) throw new Error("Slack did not return a message timestamp.");
     await setPromptTimestamp(runId, result.ts);
-  } else if (signedIn) {
-    await slackApi(request.installationId, "chat.update", {
+  }
+  return "waiting" as const;
+}
+
+async function deletePrompt(request: {
+  installationId: string;
+  channel: string;
+  promptTs: string | null;
+}) {
+  if (!request.promptTs) return;
+  try {
+    await slackApi(request.installationId, "chat.delete", {
       channel: request.channel,
       ts: request.promptTs,
-      ...signedInMessage(input.userId),
     });
+  } catch (error) {
+    // A retry can follow a successful delete whose response was lost.
+    if (!(error instanceof Error) || error.message !== "message_not_found") throw error;
   }
-  return !signedIn;
 }
 
 async function renderPending(input: ThreadSignInContext, runId: string) {
@@ -101,19 +119,20 @@ export async function resolveRequest(
     await renderPending(input, runId);
     return "waiting" as const;
   }
+  if (signal.type === "continue") {
+    await deletePrompt(request);
+    return "ready" as const;
+  }
   const message =
-    signal.type === "continue"
-      ? signedInMessage(input.userId)
-      : signal.reason === "sign-in"
-        ? cancelledSignInMessage(input.userId)
-        : cancelledRequestMessage(input.userId);
+    signal.reason === "sign-in"
+      ? cancelledSignInMessage(input.userId)
+      : cancelledRequestMessage(input.userId);
   await slackApi(request.installationId, "chat.update", {
     channel: request.channel,
     ts: request.promptTs,
     ...message,
   });
-  // Put the real work here. Only this request is allowed to continue.
-  return signal.type === "continue" ? ("completed" as const) : ("cancelled" as const);
+  return "cancelled" as const;
 }
 
 export async function finishRequest(runId: string) {

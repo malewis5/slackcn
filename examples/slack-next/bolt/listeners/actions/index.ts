@@ -13,6 +13,7 @@ import {
   continueCallback,
 } from "./sign-in";
 import signOutCallback from "./sign-out";
+import { helloCallback } from "./hello";
 
 const register = (app: App) => {
   app.action(signInActionId, signInCallback);
@@ -20,6 +21,7 @@ const register = (app: App) => {
   app.action(continueActionId, continueCallback);
   app.action(cancelContinueActionId, cancelContinueCallback);
   app.action(signOutActionId, signOutCallback);
+  app.action("hello.say", helloCallback);
 };
 
 const actions = { register };

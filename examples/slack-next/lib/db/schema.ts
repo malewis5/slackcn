@@ -32,7 +32,7 @@ export const pendingRequests = pgTable(
       .references(() => installations.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
     channel: text("channel").notNull(),
-    /** Original mention timestamp. */
+    /** Source message timestamp, shared by the sign-in link and action routing. */
     ts: text("ts").notNull(),
     promptTs: text("prompt_ts"),
   },

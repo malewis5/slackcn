@@ -1,5 +1,11 @@
+import { createHash } from "node:crypto";
 import type { KnownBlock } from "@slack/types";
 import { getInstallation } from "@/lib/database";
+
+export function clientMessageId(key: string) {
+  const hash = createHash("sha256").update(key).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
 
 // Resolve credentials at call time; never put bot tokens in workflow inputs or outputs.
 export async function slackApi<T extends object = object>(

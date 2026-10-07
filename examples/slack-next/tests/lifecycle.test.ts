@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Installation } from "@slack/bolt";
 import type { PendingRequest } from "@/lib/database";
 import type { ThreadSignInContext } from "@/lib/sign-in-context";
+import type { SlackRequest } from "@/lib/slack-request";
+import type { RequestSignal } from "@/lib/requests";
 
 const mocks = vi.hoisted(() => ({
   installations: new Map<string, Installation>(),
@@ -16,13 +18,20 @@ const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
   getConflict: vi.fn(),
   createHook: vi.fn(),
+  disposeHook: vi.fn(),
+  beforeSignal: vi.fn(),
+  signals: [] as RequestSignal[],
+  slackError: undefined as Error | undefined,
+  dispatch: vi.fn(),
 }));
 
 vi.mock("workflow/api", () => ({ resumeHook: mocks.resumeHook, getRun: mocks.getRun }));
 vi.mock("workflow", () => ({
   createHook: mocks.createHook,
   getWorkflowMetadata: () => ({ workflowRunId: "run-a" }),
+  getStepMetadata: () => ({ stepId: "step-hello" }),
 }));
+vi.mock("@/workflows/dispatch", () => ({ dispatchRequest: mocks.dispatch }));
 vi.mock("@/lib/database", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/database")>();
   return {
@@ -53,9 +62,11 @@ vi.mock("@/lib/database", async (importOriginal) => {
     removeInstallation: mocks.removeInstallation,
   };
 });
-vi.mock("@/lib/slack", () => ({
+vi.mock("@/lib/slack", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack")>()),
   slackApi: async (_id: string, method: string, body: object) => {
     mocks.calls.push({ method, body });
+    if (mocks.slackError) throw mocks.slackError;
     return { ts: "200.000001" };
   },
   homeClient: () => ({
@@ -75,8 +86,11 @@ import {
   signalRequest,
   uninstallInstallation,
 } from "@/lib/requests";
-import { beginRequest, resolveRequest } from "@/workflows/mention-steps";
-import { handleMention } from "@/workflows/mention";
+import { beginRequest, resolveRequest } from "@/workflows/sign-in-steps";
+import { signInMiddleware } from "@/workflows/sign-in-middleware";
+import { handleRequest } from "@/workflows/request";
+import { matchesSignIn } from "@/lib/sign-in-matcher";
+import { actionRequestId } from "@/lib/slack-request";
 
 const input: ThreadSignInContext = {
   userId: "U1",
@@ -85,6 +99,38 @@ const input: ThreadSignInContext = {
   channel: "C1",
   ts: "100.000001",
 };
+const request = {
+  ...input,
+  type: "event",
+  id: "Ev1",
+  body: { type: "event_callback", team_id: "T1", event_id: "Ev1", event: { text: "hello" } },
+  event: {
+    type: "app_mention",
+    user: "U1",
+    channel: "C1",
+    ts: input.ts,
+    text: "hello",
+    event_ts: input.ts,
+  },
+} satisfies SlackRequest;
+const actionRequest = {
+  ...input,
+  type: "action",
+  id: "click-1",
+  body: {
+    type: "block_actions",
+    actions: [{ action_id: "hello.say", value: "original-value" }],
+    state: { values: { selected: "original-state" } },
+  },
+  action: {
+    type: "button",
+    action_id: "hello.say",
+    block_id: "hello-block",
+    action_ts: "300.1",
+    text: { type: "plain_text", text: "Say hello" },
+    value: "original-value",
+  },
+} satisfies SlackRequest;
 function pending(runId = "run-a", ts = "100.000001"): PendingRequest {
   const row = {
     runId,
@@ -126,13 +172,26 @@ beforeEach(() => {
   mocks.removeInstallation.mockReset();
   mocks.getConflict.mockReset();
   mocks.createHook.mockReset();
+  mocks.disposeHook.mockReset();
+  mocks.beforeSignal.mockReset();
+  mocks.slackError = undefined;
+  mocks.dispatch.mockReset();
+  mocks.dispatch.mockImplementation(async (original: SlackRequest) => {
+    expect(mocks.requests.size).toBe(0);
+    mocks.calls.push({ method: "dispatch", body: original.body });
+  });
+  mocks.signals = [{ type: "cancel", reason: "sign-in" }];
   mocks.getRun.mockReturnValue({ cancel: mocks.cancel, status: Promise.resolve("running") });
   mocks.getConflict.mockResolvedValue(null);
   mocks.createHook.mockImplementation(({ token }: { token: string }) => ({
     token,
     getConflict: mocks.getConflict,
+    [Symbol.dispose]: mocks.disposeHook,
     async *[Symbol.asyncIterator]() {
-      yield { type: "cancel", reason: "sign-in" };
+      for (const signal of mocks.signals) {
+        await mocks.beforeSignal(signal);
+        yield signal;
+      }
     },
   }));
 });
@@ -240,18 +299,18 @@ describe("workflow steps", () => {
     },
   );
 
-  it("posting retries update an existing prompt instead of leaving Sign In visible", async () => {
+  it("posting retries delete an existing prompt if the user has since signed in", async () => {
     pending();
     mocks.users.add("T1:U1");
-    expect(await beginRequest(input, "run-a")).toBe(false);
+    expect(await beginRequest(input, "run-a")).toBe("ready");
     expect(mocks.calls).toEqual([
-      { method: "chat.update", body: expect.objectContaining({ text: "Hi, <@U1>!" }) },
+      { method: "chat.delete", body: { channel: "C1", ts: "200.run-a" } },
     ]);
   });
 
   it("claims the hook before posting, routes its cancellation, and cleans its directory", async () => {
-    expect(await handleMention(input)).toEqual({ status: "cancelled" });
-    expect(mocks.getConflict).toHaveBeenCalledOnce();
+    expect(await handleRequest(request)).toEqual({ status: "stopped" });
+    expect(mocks.getConflict).toHaveBeenCalledTimes(2);
     expect(mocks.calls.map((c) => c.method)).toEqual([
       "chat.postMessage",
       "chat.update",
@@ -263,9 +322,133 @@ describe("workflow steps", () => {
 
   it("a duplicate hook owner skips all database and Slack effects", async () => {
     mocks.getConflict.mockResolvedValueOnce({ runId: "already-started" });
-    expect(await handleMention(input)).toEqual({ status: "duplicate", runId: "already-started" });
+    expect(await handleRequest(request)).toEqual({ status: "duplicate", runId: "already-started" });
     expect(mocks.calls).toEqual([]);
     expect(mocks.requests.size).toBe(0);
+  });
+});
+
+describe("sign-in middleware", () => {
+  it("unmatched requests pass through without auth side effects", async () => {
+    expect(await signInMiddleware(request, { matcher: [{ action_id: "hello.say" }] })).toBe(true);
+    expect(mocks.calls).toEqual([]);
+    expect(mocks.createHook).not.toHaveBeenCalled();
+    expect(mocks.requests.size).toBe(0);
+  });
+
+  it("signed-in requests reach the handler without an auth prompt", async () => {
+    mocks.users.add("T1:U1");
+    expect(await handleRequest(request)).toEqual({ status: "completed" });
+    expect(mocks.calls).toEqual([{ method: "dispatch", body: request.body }]);
+    expect(mocks.dispatch).toHaveBeenCalledExactlyOnceWith(request);
+    expect(mocks.requests.size).toBe(0);
+    expect(mocks.createHook).toHaveBeenCalledOnce();
+  });
+
+  it.each([request, actionRequest])(
+    "deletes the prompt before continuing the original $type handler",
+    async (original) => {
+      mocks.signals = [{ type: "continue" }];
+      mocks.beforeSignal.mockImplementation(() => mocks.users.add("T1:U1"));
+      expect(await handleRequest(original)).toEqual({ status: "completed" });
+      expect(mocks.dispatch).toHaveBeenCalledExactlyOnceWith(original);
+      expect(mocks.calls.map((call) => call.method)).toEqual([
+        "chat.postMessage",
+        "chat.update",
+        "chat.delete",
+        "dispatch",
+      ]);
+      expect(mocks.calls[2].body).toEqual({ channel: "C1", ts: "200.000001" });
+      expect(mocks.calls.at(-1)?.body).toEqual(original.body);
+      expect(mocks.requests.size).toBe(0);
+      expect(mocks.disposeHook).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("cancel stops business work and disposes only the auth hook", async () => {
+    expect(await handleRequest(actionRequest)).toEqual({ status: "stopped" });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(
+      mocks.calls.every((call) => !("text" in call.body) || call.body.text !== "Hi, <@U1>!"),
+    ).toBe(true);
+    expect(mocks.disposeHook).toHaveBeenCalledOnce();
+    expect(mocks.requests.size).toBe(0);
+  });
+
+  it("missing installations stop without posting", async () => {
+    mocks.installations.clear();
+    expect(await handleRequest(request)).toEqual({ status: "stopped" });
+    expect(mocks.calls).toEqual([]);
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("duplicate signed-in deliveries skip the handler too", async () => {
+    mocks.users.add("T1:U1");
+    mocks.getConflict.mockResolvedValueOnce({ runId: "owner" });
+    expect(await handleRequest(request)).toEqual({ status: "duplicate", runId: "owner" });
+    expect(mocks.calls).toEqual([]);
+  });
+
+  it("already-deleted prompts are safe to retry", async () => {
+    pending();
+    mocks.users.add("T1:U1");
+    mocks.slackError = new Error("message_not_found");
+    expect(await resolveRequest(input, "run-a", { type: "continue" })).toBe("ready");
+  });
+
+  it("other deletion errors prevent the handler from continuing", async () => {
+    pending();
+    mocks.users.add("T1:U1");
+    mocks.slackError = new Error("invalid_auth");
+    await expect(resolveRequest(input, "run-a", { type: "continue" })).rejects.toThrow(
+      "invalid_auth",
+    );
+  });
+});
+
+describe("proxy matcher", () => {
+  it("matches exact event names and action IDs", () => {
+    const config = { matcher: [{ event: "app_mention" }, { action_id: "hello.say" }] };
+    expect(matchesSignIn(request, config)).toBe(true);
+    expect(matchesSignIn(actionRequest, config)).toBe(true);
+    expect(matchesSignIn(actionRequest, { matcher: [{ action_id: "hello" }] })).toBe(false);
+    expect(matchesSignIn(request, { matcher: [{ event: "message" }] })).toBe(false);
+    expect(matchesSignIn(request)).toBe(true);
+    expect(matchesSignIn(request, { matcher: [] })).toBe(false);
+  });
+
+  it.each([
+    "slackcn.sign_in",
+    "slackcn.sign_out",
+    "slackcn.cancel",
+    "slackcn.continue",
+    "slackcn.cancel_continue",
+  ])("bypasses %s even if explicitly matched", (action_id) => {
+    const control: SlackRequest = {
+      ...actionRequest,
+      type: "action",
+      action: { ...actionRequest.action, action_id },
+    };
+    expect(matchesSignIn(control)).toBe(false);
+    expect(matchesSignIn(control, { matcher: [{ action_id }] })).toBe(false);
+  });
+
+  it("bypasses uninstall cleanup", () => {
+    expect(matchesSignIn({ ...request, type: "event", event: { type: "app_uninstalled" } })).toBe(
+      false,
+    );
+  });
+
+  it("keeps Home available when protecting all requests", () => {
+    expect(matchesSignIn({ type: "event", event: { type: "app_home_opened" } })).toBe(false);
+  });
+
+  it("deduplicates redelivered clicks but distinguishes new clicks on the same message", () => {
+    const id = actionRequestId("C1", input.ts, "U1", actionRequest.action);
+    expect(actionRequestId("C1", input.ts, "U1", { ...actionRequest.action })).toBe(id);
+    expect(
+      actionRequestId("C1", input.ts, "U1", { ...actionRequest.action, action_ts: "300.2" }),
+    ).not.toBe(id);
   });
 });
 

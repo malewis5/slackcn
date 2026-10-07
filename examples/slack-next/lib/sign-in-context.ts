@@ -9,10 +9,10 @@ type WorkspaceSignIn = {
 
 export type ThreadSignInContext = WorkspaceSignIn & {
   channel: string;
-  /** Mention message timestamp. */
+  /** Source message timestamp (a mention or the message containing an action). */
   ts: string;
   threadTs?: string;
-  /** The pending workflow opened by this mention. */
+  /** The pending workflow opened by this request. */
   requestId?: string;
 };
 
@@ -72,7 +72,7 @@ export function signInPageUrl(context: SignInContext) {
   return `${getBaseURL()}/sign-in?${params.toString()}`;
 }
 
-/** Opens the native Slack client on the mention, in its thread. */
+/** Opens the native Slack client on the source message, in its thread. */
 export function slackDeepLink(context: ThreadSignInContext) {
   const params = new URLSearchParams({
     team: context.teamId,
