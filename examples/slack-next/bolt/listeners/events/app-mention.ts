@@ -15,13 +15,7 @@ export const appMentionCallback = async ({
   const signedIn = signedInUsers.has(event.user);
 
   if (signedIn) {
-    const text = "You are already signed in.";
-    const button = {
-      type: "button",
-      text: { type: "plain_text", text: "Sign out", emoji: true },
-      action_id: signOutActionId,
-      visible_to_user_ids: [event.user],
-    } satisfies Button & { visible_to_user_ids: string[] };
+    const text = `Hi, <@${event.user}>!`;
 
     await client.chat.postMessage({
       channel: event.channel,
@@ -29,7 +23,6 @@ export const appMentionCallback = async ({
       text,
       blocks: [
         { type: "section", text: { type: "mrkdwn", text } },
-        { type: "actions", elements: [button] },
       ] satisfies KnownBlock[],
     });
   } else {

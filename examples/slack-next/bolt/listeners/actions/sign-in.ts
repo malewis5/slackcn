@@ -4,6 +4,7 @@ import type {
   SlackActionMiddlewareArgs,
 } from "@slack/bolt";
 import { signedInUsers } from "../events/app-mention";
+import { publishAppHome } from "../events/app-home-opened";
 
 export const signInCallback = async ({
   ack,
@@ -12,6 +13,7 @@ export const signInCallback = async ({
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
   signedInUsers.add(body.user.id);
+  await publishAppHome(client, body.user.id);
 
   const channel = body.channel?.id;
   const ts = body.message?.ts;
