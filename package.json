@@ -1,6 +1,6 @@
 {
   "name": "slackcn",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Block Kit components and TypeScript helpers, distributed through a shadcn registry.",
   "license": "UNLICENSED",
