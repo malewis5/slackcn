@@ -1,70 +1,7 @@
-import { MemoryInstallationStore, type InstallationQuery } from "@slack/bolt";
-
-// Next bundles the webhook and the sign-in page separately. Keep one store per process.
-type SignInPrompt = { channel: string; ts: string };
-
-const shared = globalThis as typeof globalThis & {
-  slackcn?: {
-    signedInUsers: Map<string, Set<string>>;
-    installationStore: MemoryInstallationStore;
-    pendingPrompts: Map<string, Map<string, SignInPrompt[]>>;
-  };
-};
-
-shared.slackcn ??= {
-  signedInUsers: new Map(),
-  installationStore: new MemoryInstallationStore(),
-  pendingPrompts: new Map(),
-};
-shared.slackcn.pendingPrompts ??= new Map();
-
-export const signedInUsers = shared.slackcn.signedInUsers;
-export const installationStore = shared.slackcn.installationStore;
-const pendingPrompts = shared.slackcn.pendingPrompts;
-
-function promptsFor(installationId: string, userId: string) {
-  return pendingPrompts.get(installationId)?.get(userId) ?? [];
-}
-
-function setPrompts(installationId: string, userId: string, prompts: SignInPrompt[]) {
-  const users = pendingPrompts.get(installationId) ?? new Map<string, SignInPrompt[]>();
-  if (prompts.length === 0) users.delete(userId);
-  else users.set(userId, prompts);
-  if (users.size === 0) pendingPrompts.delete(installationId);
-  else pendingPrompts.set(installationId, users);
-}
-
-export function rememberSignInPrompt(
-  installationId: string,
-  userId: string,
-  prompt: SignInPrompt,
-) {
-  const prompts = promptsFor(installationId, userId);
-  if (!prompts.some((item) => item.channel === prompt.channel && item.ts === prompt.ts)) {
-    prompts.push(prompt);
-  }
-  setPrompts(installationId, userId, prompts);
-}
-
-export function forgetSignInPrompt(
-  installationId: string,
-  userId: string,
-  prompt: { channel: string; ts: string },
-) {
-  setPrompts(
-    installationId,
-    userId,
-    promptsFor(installationId, userId).filter(
-      (item) => item.channel !== prompt.channel || item.ts !== prompt.ts,
-    ),
-  );
-}
-
-export function takeSignInPrompts(installationId: string, userId: string) {
-  const prompts = promptsFor(installationId, userId);
-  setPrompts(installationId, userId, []);
-  return prompts;
-}
+import type { Installation, InstallationQuery, InstallationStore } from "@slack/bolt";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/lib/db/client";
+import { installations, signInPrompts, signedInUsers } from "@/lib/db/schema";
 
 export function installationKey(query: {
   teamId?: string;
@@ -75,17 +12,134 @@ export function installationKey(query: {
   return query.teamId;
 }
 
-export function usersFor(installationId: string) {
-  const users = signedInUsers.get(installationId) ?? new Set<string>();
-  signedInUsers.set(installationId, users);
-  return users;
+function installationId(installation: Installation) {
+  if (installation.isEnterpriseInstall && installation.enterprise !== undefined) {
+    return installation.enterprise.id;
+  }
+  if (!installation.isEnterpriseInstall && installation.team !== undefined) {
+    return installation.team.id;
+  }
+  throw new Error("Failed saving installation data to installationStore");
 }
 
-export async function deleteInstallation(query: InstallationQuery<boolean>) {
-  const installationId = installationKey(query);
-  if (!installationId) return;
+async function removeInstallation(id: string) {
+  await getDb().delete(installations).where(eq(installations.id, id));
+}
 
-  await installationStore.deleteInstallation(query);
-  signedInUsers.delete(installationId);
-  pendingPrompts.delete(installationId);
+export const installationStore: InstallationStore = {
+  async storeInstallation(installation) {
+    const id = installationId(installation);
+    const row = {
+      id,
+      teamId: installation.team?.id ?? null,
+      enterpriseId: installation.enterprise?.id ?? null,
+      isEnterpriseInstall: installation.isEnterpriseInstall ?? false,
+      installation,
+    };
+    await getDb()
+      .insert(installations)
+      .values(row)
+      .onConflictDoUpdate({
+        target: installations.id,
+        set: {
+          teamId: row.teamId,
+          enterpriseId: row.enterpriseId,
+          isEnterpriseInstall: row.isEnterpriseInstall,
+          installation: row.installation,
+        },
+      });
+  },
+
+  async fetchInstallation(query) {
+    const id =
+      query.isEnterpriseInstall && query.enterpriseId !== undefined
+        ? query.enterpriseId
+        : query.teamId;
+    if (!id) throw new Error("Failed fetching installation");
+
+    const [row] = await getDb()
+      .select()
+      .from(installations)
+      .where(eq(installations.id, id))
+      .limit(1);
+    return row?.installation as Installation;
+  },
+
+  async deleteInstallation(query) {
+    if (query.isEnterpriseInstall && query.enterpriseId !== undefined) {
+      await removeInstallation(query.enterpriseId);
+      return;
+    }
+    if (query.teamId !== undefined) {
+      await removeInstallation(query.teamId);
+      return;
+    }
+    throw new Error("Failed to delete installation");
+  },
+};
+
+export async function deleteInstallation(query: InstallationQuery<boolean>) {
+  const id = installationKey(query);
+  if (!id) return;
+  await removeInstallation(id);
+}
+
+export async function isSignedIn(installationId: string, userId: string) {
+  const [row] = await getDb()
+    .select({ userId: signedInUsers.userId })
+    .from(signedInUsers)
+    .where(
+      and(eq(signedInUsers.installationId, installationId), eq(signedInUsers.userId, userId)),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+export async function signInUser(installationId: string, userId: string) {
+  await getDb().insert(signedInUsers).values({ installationId, userId }).onConflictDoNothing();
+}
+
+export async function signOutUser(installationId: string, userId: string) {
+  await getDb()
+    .delete(signedInUsers)
+    .where(
+      and(eq(signedInUsers.installationId, installationId), eq(signedInUsers.userId, userId)),
+    );
+}
+
+export async function rememberSignInPrompt(
+  installationId: string,
+  userId: string,
+  prompt: { channel: string; ts: string },
+) {
+  await getDb()
+    .insert(signInPrompts)
+    .values({ installationId, userId, channel: prompt.channel, ts: prompt.ts })
+    .onConflictDoNothing();
+}
+
+export async function forgetSignInPrompt(
+  installationId: string,
+  userId: string,
+  prompt: { channel: string; ts: string },
+) {
+  await getDb()
+    .delete(signInPrompts)
+    .where(
+      and(
+        eq(signInPrompts.installationId, installationId),
+        eq(signInPrompts.userId, userId),
+        eq(signInPrompts.channel, prompt.channel),
+        eq(signInPrompts.ts, prompt.ts),
+      ),
+    );
+}
+
+export async function takeSignInPrompts(installationId: string, userId: string) {
+  return getDb()
+    .delete(signInPrompts)
+    .where(
+      and(eq(signInPrompts.installationId, installationId), eq(signInPrompts.userId, userId)),
+    )
+    .returning({ channel: signInPrompts.channel, ts: signInPrompts.ts });
 }

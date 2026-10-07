@@ -1,6 +1,7 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
 import type { KnownBlock } from "@slack/types";
-import { installationKey, usersFor } from "@/lib/database";
+import { installationKey, isSignedIn } from "@/lib/database";
+import { signInPageUrl } from "@/lib/sign-in";
 import { signInActionId, signOutActionId } from "./app-mention";
 
 export async function publishAppHome(
@@ -14,8 +15,13 @@ export async function publishAppHome(
   },
   installationId: string,
   userId: string,
+  workspace: {
+    teamId: string;
+    enterpriseId?: string;
+    isEnterpriseInstall: boolean;
+  },
 ) {
-  const blocks: KnownBlock[] = usersFor(installationId).has(userId)
+  const blocks: KnownBlock[] = (await isSignedIn(installationId, userId))
     ? [
         {
           type: "actions",
@@ -36,6 +42,11 @@ export async function publishAppHome(
               type: "button",
               text: { type: "plain_text", text: "Sign in", emoji: true },
               action_id: signInActionId,
+              url: signInPageUrl({
+                userId,
+                home: true,
+                ...workspace,
+              }),
             },
           ],
         },
@@ -53,7 +64,11 @@ export const appHomeOpenedCallback = async ({
   context,
 }: AllMiddlewareArgs & SlackEventMiddlewareArgs<"app_home_opened">) => {
   const installationId = installationKey(context);
-  if (event.tab !== "home" || !installationId) return;
+  if (event.tab !== "home" || !installationId || !context.teamId) return;
 
-  await publishAppHome(client, installationId, event.user);
+  await publishAppHome(client, installationId, event.user, {
+    teamId: context.teamId,
+    enterpriseId: context.enterpriseId,
+    isEnterpriseInstall: context.isEnterpriseInstall ?? false,
+  });
 };

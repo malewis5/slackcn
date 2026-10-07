@@ -1,11 +1,13 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs } from "@slack/bolt";
 import type { Button, KnownBlock } from "@slack/types";
-import { installationKey, rememberSignInPrompt, usersFor } from "@/lib/database";
+import { installationKey, isSignedIn, rememberSignInPrompt } from "@/lib/database";
 import { signedInMessage, signInPageUrl, type SignInContext } from "@/lib/sign-in";
 
 export const signOutActionId = "slackcn.sign_out";
 export const signInActionId = "slackcn.sign_in";
 export const cancelSignInActionId = "slackcn.cancel";
+export const continueActionId = "slackcn.continue";
+export const cancelContinueActionId = "slackcn.cancel_continue";
 
 export const appMentionCallback = async ({
   event,
@@ -15,7 +17,7 @@ export const appMentionCallback = async ({
   const installationId = installationKey(context);
   if (!event.user || !installationId) return;
 
-  const signedIn = usersFor(installationId).has(event.user);
+  const signedIn = await isSignedIn(installationId, event.user);
   const threadTs = event.thread_ts ?? event.ts;
 
   if (signedIn) {
@@ -43,7 +45,7 @@ export const appMentionCallback = async ({
     });
     if (!posted.ts) return;
 
-    rememberSignInPrompt(installationId, event.user, {
+    await rememberSignInPrompt(installationId, event.user, {
       channel: event.channel,
       ts: posted.ts,
     });
@@ -53,6 +55,30 @@ export const appMentionCallback = async ({
       ...signInPrompt(event.user, signInPageUrl({ ...destination, promptTs: posted.ts })),
     });
   }
+}
+
+export function continueHereMessage(userId: string) {
+  const text = `You're signed in, <@${userId}>. Continue here?`;
+  const continueButton = {
+    type: "button",
+    text: { type: "plain_text", text: "Continue", emoji: true },
+    action_id: continueActionId,
+    visible_to_user_ids: [userId],
+  } satisfies Button & { visible_to_user_ids: string[] };
+  const cancelButton = {
+    type: "button",
+    text: { type: "plain_text", text: "Cancel", emoji: true },
+    action_id: cancelContinueActionId,
+    visible_to_user_ids: [userId],
+  } satisfies Button & { visible_to_user_ids: string[] };
+
+  return {
+    text,
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text } },
+      { type: "actions", elements: [continueButton, cancelButton] },
+    ] satisfies KnownBlock[],
+  };
 }
 
 function signInPrompt(userId: string, url: string) {

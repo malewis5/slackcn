@@ -3,30 +3,45 @@ import type {
   BlockAction,
   SlackActionMiddlewareArgs,
 } from "@slack/bolt";
-import { forgetSignInPrompt, installationKey, usersFor } from "@/lib/database";
-import { cancelSignIn, showSignedInInThreads } from "@/lib/sign-in";
+import { forgetSignInPrompt, installationKey, signOutUser } from "@/lib/database";
+import { cancelSignIn, cancelledRequestMessage, signedInMessage } from "@/lib/sign-in";
 import { publishAppHome } from "../events/app-home-opened";
 
 export const signInCallback = async ({
+  ack,
+}: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
+  await ack();
+};
+
+export const continueCallback = async ({
+  ack,
+  body,
+  client,
+}: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
+  await ack();
+  const channel = body.channel?.id;
+  const ts = body.message?.ts;
+  if (!channel || !ts) return;
+
+  await client.chat.update({ channel, ts, ...signedInMessage(body.user.id) });
+};
+
+export const cancelContinueCallback = async ({
   ack,
   body,
   client,
   context,
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
-  // Link buttons open the sign-in page. That page records the user.
-  if (body.channel?.id && body.message?.ts) return;
+  const channel = body.channel?.id;
+  const ts = body.message?.ts;
+  if (!channel || !ts) return;
 
+  await client.chat.update({ channel, ts, ...cancelledRequestMessage(body.user.id) });
   const installationId = installationKey(context);
   if (!installationId) return;
 
-  usersFor(installationId).add(body.user.id);
-  await publishAppHome(client, installationId, body.user.id);
-  await showSignedInInThreads(
-    (message) => client.chat.update(message),
-    installationId,
-    body.user.id,
-  );
+  await forgetSignInPrompt(installationId, body.user.id, { channel, ts });
 };
 
 export const cancelSignInCallback = async ({
@@ -40,9 +55,13 @@ export const cancelSignInCallback = async ({
   const ts = body.message?.ts;
   const installationId = installationKey(context);
   if (!channel || !ts) {
-    if (installationId) {
-      usersFor(installationId).delete(body.user.id);
-      await publishAppHome(client, installationId, body.user.id);
+    if (installationId && context.teamId) {
+      await signOutUser(installationId, body.user.id);
+      await publishAppHome(client, installationId, body.user.id, {
+        teamId: context.teamId,
+        enterpriseId: context.enterpriseId,
+        isEnterpriseInstall: context.isEnterpriseInstall ?? false,
+      });
     }
     return;
   }
@@ -55,6 +74,12 @@ export const cancelSignInCallback = async ({
   });
   if (!installationId) return;
 
-  forgetSignInPrompt(installationId, body.user.id, { channel, ts });
-  await publishAppHome(client, installationId, body.user.id);
+  await forgetSignInPrompt(installationId, body.user.id, { channel, ts });
+  if (!context.teamId) return;
+
+  await publishAppHome(client, installationId, body.user.id, {
+    teamId: context.teamId,
+    enterpriseId: context.enterpriseId,
+    isEnterpriseInstall: context.isEnterpriseInstall ?? false,
+  });
 };
