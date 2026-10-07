@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "slackcn",
+  "homepage": "https://github.com/malewis5/slackcn",
+  "items": [
+    {
+      "name": "sign-in-message",
+      "type": "registry:item",
+      "title": "Sign-in message",
+      "description": "A public Block Kit message with a sign-in button visible to the requester.",
+      "dependencies": ["@slack/types@^3.2.0"],
+      "files": [
+        {
+          "path": "registry/slack/sign-in-message.ts",
+          "type": "registry:file",
+          "target": "slackcn/sign-in-message.ts"
+        }
+      ]
+    }
+  ]
+}
