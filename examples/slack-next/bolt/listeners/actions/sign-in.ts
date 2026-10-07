@@ -3,17 +3,21 @@ import type {
   BlockAction,
   SlackActionMiddlewareArgs,
 } from "@slack/bolt";
-import { signedInUsers } from "../events/app-mention";
+import { installationKey, usersFor } from "@/lib/database";
 import { publishAppHome } from "../events/app-home-opened";
 
 export const signInCallback = async ({
   ack,
   body,
   client,
+  context,
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
-  signedInUsers.add(body.user.id);
-  await publishAppHome(client, body.user.id);
+  const installationId = installationKey(context);
+  if (!installationId) return;
+
+  usersFor(installationId).add(body.user.id);
+  await publishAppHome(client, installationId, body.user.id);
 
   const channel = body.channel?.id;
   const ts = body.message?.ts;
@@ -26,9 +30,11 @@ export const cancelSignInCallback = async ({
   ack,
   body,
   client,
+  context,
 }: AllMiddlewareArgs & SlackActionMiddlewareArgs<BlockAction>) => {
   await ack();
-  signedInUsers.delete(body.user.id);
+  const installationId = installationKey(context);
+  if (installationId) usersFor(installationId).delete(body.user.id);
 
   const channel = body.channel?.id;
   const ts = body.message?.ts;
